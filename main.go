@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -32,14 +33,33 @@ type WiFiMonitor struct {
 	logView      *tview.TextView    // Log display widget
 
 	wifiInterface string // Network interface used for tests (e.g., wlan0)
+	logFile       string // Log file path for persistent storage
+	headless      bool   // Run in headless mode (no TUI)
 }
 
 // NewWiFiMonitor creates a new WiFi monitor instance
 func NewWiFiMonitor() *WiFiMonitor {
+	// Get WiFi interface from environment variable, default to wlan0
+	wifiInterface := os.Getenv("WIFI_INTERFACE")
+	if wifiInterface == "" {
+		wifiInterface = "wlan0"
+	}
+
+	// Get log file path from environment variable, default to current directory
+	logFile := os.Getenv("LOG_FILE")
+	if logFile == "" {
+		logFile = "noc-watch.log"
+	}
+
+	// Check if running in headless mode
+	headless := os.Getenv("HEADLESS") == "true"
+
 	return &WiFiMonitor{
 		dhcpTests:     make([]WiFiTest, 0),
 		pingTests:     make([]WiFiTest, 0),
-		wifiInterface: "wlan0",
+		wifiInterface: wifiInterface,
+		logFile:       logFile,
+		headless:      headless,
 	}
 }
 
@@ -141,6 +161,10 @@ func (w *WiFiMonitor) runTest() WiFiTest {
 
 // updateUI updates all UI components with current test data
 func (w *WiFiMonitor) updateUI() {
+	if w.headless {
+		return // No UI updates in headless mode
+	}
+
 	// Calculate success rate
 	var successRate float64
 	if w.totalCount > 0 {
@@ -231,52 +255,157 @@ func (w *WiFiMonitor) updateUI() {
 	})
 }
 
+// writeResultsToFile writes test results to a text file
+func (w *WiFiMonitor) writeResultsToFile() error {
+	file, err := os.OpenFile(w.logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	currentTime := time.Now().Format("2006-01-02 15:04:05")
+
+	// Write summary
+	_, err = fmt.Fprintf(file, "\n=== WiFi Quality Test Results - %s ===\n", currentTime)
+	if err != nil {
+		return err
+	}
+
+	// Write DHCP test results
+	if len(w.dhcpTests) > 0 {
+		latest := w.dhcpTests[len(w.dhcpTests)-1]
+		_, err = fmt.Fprintf(file, "DHCP Test: Success=%v, Time=%v\n", latest.Success, latest.DHCPRenewTime)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Write ping test results
+	if len(w.pingTests) > 0 {
+		latest := w.pingTests[len(w.pingTests)-1]
+		_, err = fmt.Fprintf(file, "Ping Test: Success=%v, IPv4=%v, IPv6=%v, Latency=%v\n",
+			latest.Success, latest.IPv4Connectivity, latest.IPv6Connectivity, latest.Latency)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Write statistics
+	_, err = fmt.Fprintf(file, "Total Tests: %d, Success: %d, Success Rate: %.2f%%\n",
+		w.totalCount, w.successCount,
+		func() float64 {
+			if w.totalCount > 0 {
+				return float64(w.successCount) / float64(w.totalCount) * 100
+			}
+			return 0
+		}())
+	if err != nil {
+		return err
+	}
+
+	_, err = fmt.Fprintf(file, "==========================================\n")
+	return err
+}
+
 // startMonitoring begins periodic WiFi quality testing
 func (w *WiFiMonitor) startMonitoring() {
-	// DHCP test every 5 minutes
-	dhcpTicker := time.NewTicker(5 * time.Minute)
-	defer dhcpTicker.Stop()
+	if w.headless {
+		// In headless mode, run tests and write results to file
+		dhcpTicker := time.NewTicker(5 * time.Minute)
+		defer dhcpTicker.Stop()
 
-	// Ping and latency test every 1 minute
-	pingTicker := time.NewTicker(1 * time.Minute)
-	defer pingTicker.Stop()
+		pingTicker := time.NewTicker(1 * time.Minute)
+		defer pingTicker.Stop()
 
-	// UI update every 1 second for current time display
-	uiTicker := time.NewTicker(1 * time.Second)
-	defer uiTicker.Stop()
+		fileTicker := time.NewTicker(1 * time.Minute)
+		defer fileTicker.Stop()
 
-	// Initial UI update to show the framework
-	w.updateUI()
+		for {
+			select {
+			case <-dhcpTicker.C:
+				// Run full test including DHCP renewal
+				test := w.runTest()
+				w.dhcpTests = append(w.dhcpTests, test)
+				w.totalCount++
 
-	for {
-		select {
-		case <-dhcpTicker.C:
-			// Run full test including DHCP renewal
-			test := w.runTest()
-			w.dhcpTests = append(w.dhcpTests, test)
-			w.totalCount++
+				if test.Success {
+					w.successCount++
+				}
 
-			if test.Success {
-				w.successCount++
+				w.updateUI() // Still update UI for consistency, but no TUI
+
+			case <-pingTicker.C:
+				// Run only connectivity and latency tests (skip DHCP)
+				test := w.runConnectivityTest()
+				w.pingTests = append(w.pingTests, test)
+				w.totalCount++
+
+				if test.Success {
+					w.successCount++
+				}
+
+				w.updateUI() // Still update UI for consistency, but no TUI
+
+			case <-fileTicker.C:
+				// Write results to file every minute
+				if err := w.writeResultsToFile(); err != nil {
+					fmt.Printf("Error writing to file: %v\n", err)
+				}
 			}
+		}
+	} else {
+		// In TUI mode, run tests and update UI
+		dhcpTicker := time.NewTicker(5 * time.Minute)
+		defer dhcpTicker.Stop()
 
-			w.updateUI()
+		pingTicker := time.NewTicker(1 * time.Minute)
+		defer pingTicker.Stop()
 
-		case <-pingTicker.C:
-			// Run only connectivity and latency tests (skip DHCP)
-			test := w.runConnectivityTest()
-			w.pingTests = append(w.pingTests, test)
-			w.totalCount++
+		uiTicker := time.NewTicker(1 * time.Second)
+		defer uiTicker.Stop()
 
-			if test.Success {
-				w.successCount++
+		fileTicker := time.NewTicker(1 * time.Minute)
+		defer fileTicker.Stop()
+
+		// Initial UI update to show the framework
+		w.updateUI()
+
+		for {
+			select {
+			case <-dhcpTicker.C:
+				// Run full test including DHCP renewal
+				test := w.runTest()
+				w.dhcpTests = append(w.dhcpTests, test)
+				w.totalCount++
+
+				if test.Success {
+					w.successCount++
+				}
+
+				w.updateUI()
+
+			case <-pingTicker.C:
+				// Run only connectivity and latency tests (skip DHCP)
+				test := w.runConnectivityTest()
+				w.pingTests = append(w.pingTests, test)
+				w.totalCount++
+
+				if test.Success {
+					w.successCount++
+				}
+
+				w.updateUI()
+
+			case <-uiTicker.C:
+				// Update UI every second for current time display
+				w.updateUI()
+
+			case <-fileTicker.C:
+				// Write results to file every minute
+				if err := w.writeResultsToFile(); err != nil {
+					fmt.Printf("Error writing to file: %v\n", err)
+				}
 			}
-
-			w.updateUI()
-
-		case <-uiTicker.C:
-			// Update UI every second for current time display
-			w.updateUI()
 		}
 	}
 }
@@ -306,56 +435,61 @@ func (w *WiFiMonitor) runConnectivityTest() WiFiTest {
 func main() {
 	monitor := NewWiFiMonitor()
 
-	// Create TUI application
-	app := tview.NewApplication()
-	monitor.app = app
+	// Create TUI application if not headless
+	if !monitor.headless {
+		app := tview.NewApplication()
+		monitor.app = app
 
-	// Create widgets
-	monitor.statsView = tview.NewTextView().
-		SetDynamicColors(true).
-		SetTextAlign(tview.AlignCenter)
+		// Create widgets
+		monitor.statsView = tview.NewTextView().
+			SetDynamicColors(true).
+			SetTextAlign(tview.AlignCenter)
 
-	monitor.chartView = tview.NewTextView().
-		SetDynamicColors(true).
-		SetTextAlign(tview.AlignLeft)
+		monitor.chartView = tview.NewTextView().
+			SetDynamicColors(true).
+			SetTextAlign(tview.AlignLeft)
 
-	monitor.logView = tview.NewTextView().
-		SetDynamicColors(true).
-		SetTextAlign(tview.AlignLeft)
+		monitor.logView = tview.NewTextView().
+			SetDynamicColors(true).
+			SetTextAlign(tview.AlignLeft)
 
-	// Get current time for initial display
-	currentTime := time.Now().Format("2006-01-02 15:04:05")
+		// Get current time for initial display
+		currentTime := time.Now().Format("2006-01-02 15:04:05")
 
-	// Set initial content
-	monitor.statsView.SetText(fmt.Sprintf("[white]WiFi Quality Monitor\n"+
-		"Current Time: [cyan]%s[white]\n"+
-		"Total Tests: 0 | [green]Success: 0[white] | [red]Failure: 0[white]\n"+
-		"Success Rate: [yellow]0.00%%[white]\n", currentTime))
+		// Set initial content
+		monitor.statsView.SetText(fmt.Sprintf("[white]WiFi Quality Monitor\n"+
+			"Current Time: [cyan]%s[white]\n"+
+			"Total Tests: 0 | [green]Success: 0[white] | [red]Failure: 0[white]\n"+
+			"Success Rate: [yellow]0.00%%[white]\n", currentTime))
 
-	monitor.chartView.SetText("Test Results:\n\n" +
-		"[yellow]DHCP Test Results (Every 5 minutes):[white]\n" +
-		"  [yellow]Waiting for first DHCP test...[white]\n\n" +
-		"[yellow]Ping Test Results (Every 1 minute):[white]\n" +
-		"  [yellow]Waiting for first ping test...[white]")
+		monitor.chartView.SetText("Test Results:\n\n" +
+			"[yellow]DHCP Test Results (Every 5 minutes):[white]\n" +
+			"  [yellow]Waiting for first DHCP test...[white]\n\n" +
+			"[yellow]Ping Test Results (Every 1 minute):[white]\n" +
+			"  [yellow]Waiting for first ping test...[white]")
 
-	monitor.logView.SetText("Latest Test Results:\n\n" +
-		"[yellow]Latest DHCP Test:[white]\n" +
-		"[yellow]No DHCP tests completed yet.[white]\n\n" +
-		"[yellow]Latest Ping Test:[white]\n" +
-		"[yellow]No ping tests completed yet.[white]")
+		monitor.logView.SetText("Latest Test Results:\n\n" +
+			"[yellow]Latest DHCP Test:[white]\n" +
+			"[yellow]No DHCP tests completed yet.[white]\n\n" +
+			"[yellow]Latest Ping Test:[white]\n" +
+			"[yellow]No ping tests completed yet.[white]")
 
-	// Create layout
-	flex := tview.NewFlex().
-		SetDirection(tview.FlexRow).
-		AddItem(monitor.statsView, 5, 1, false).
-		AddItem(monitor.chartView, 0, 2, false).
-		AddItem(monitor.logView, 15, 1, true)
+		// Create layout
+		flex := tview.NewFlex().
+			SetDirection(tview.FlexRow).
+			AddItem(monitor.statsView, 5, 1, false).
+			AddItem(monitor.chartView, 0, 2, false).
+			AddItem(monitor.logView, 15, 1, true)
 
-	// Start monitoring
-	go monitor.startMonitoring()
+		// Start monitoring
+		go monitor.startMonitoring()
 
-	// Run application
-	if err := app.SetRoot(flex, true).Run(); err != nil {
-		panic(err)
+		// Run application
+		if err := app.SetRoot(flex, true).Run(); err != nil {
+			panic(err)
+		}
+	} else {
+		// In headless mode, just start monitoring and write results
+		monitor.startMonitoring()
 	}
 }

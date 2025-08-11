@@ -1,0 +1,27 @@
+[Unit]
+Description=NOC Watch - WiFi Quality Monitor
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/noc-watch
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Environment variables
+Environment=WIFI_INTERFACE=wlan0
+Environment=LOG_FILE=/var/log/noc-watch/noc-watch.log
+Environment=HEADLESS=true
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/log/noc-watch
+
+[Install]
+WantedBy=multi-user.target
