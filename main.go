@@ -171,9 +171,9 @@ func (w *WiFiMonitor) updateUI() {
 			if i >= 10 { // Show only latest 10 DHCP tests
 				break
 			}
-			status := "[red]✗"
+			status := "[red]x"
 			if test.Success {
-				status = "[green]✓"
+				status = "[green]o"
 			}
 			chartText += fmt.Sprintf("  [%d] %s DHCP: %v\n",
 				i+1, status, test.DHCPRenewTime)
@@ -188,8 +188,12 @@ func (w *WiFiMonitor) updateUI() {
 			if i >= 10 { // Show only latest 10 ping tests
 				break
 			}
-			chartText += fmt.Sprintf("  [%d] IPv4: %v IPv6: %v Latency: %v\n",
-				i+1, test.IPv4Connectivity, test.IPv6Connectivity, test.Latency)
+			status := "[red]x"
+			if test.Success {
+				status = "[green]o"
+			}
+			chartText += fmt.Sprintf("  [%d] %s IPv4: %v IPv6: %v Latency: %v\n",
+				i+1, status, test.IPv4Connectivity, test.IPv6Connectivity, test.Latency)
 		}
 	}
 
@@ -202,9 +206,6 @@ func (w *WiFiMonitor) updateUI() {
 		latest := w.dhcpTests[len(w.dhcpTests)-1]
 		logText += fmt.Sprintf("Time: %s\n", latest.Timestamp.Format("15:04:05"))
 		logText += fmt.Sprintf("DHCP Renew: %v\n", latest.DHCPRenewTime)
-		logText += fmt.Sprintf("IPv4: %v\n", latest.IPv4Connectivity)
-		logText += fmt.Sprintf("IPv6: %v\n", latest.IPv6Connectivity)
-		logText += fmt.Sprintf("Latency: %v\n", latest.Latency)
 		logText += fmt.Sprintf("Success: %v\n", latest.Success)
 	} else {
 		logText += "[yellow]No DHCP tests completed yet.[white]\n"
