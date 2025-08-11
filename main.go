@@ -175,8 +175,8 @@ func (w *WiFiMonitor) updateUI() {
 			if test.Success {
 				status = "[green]✓"
 			}
-			chartText += fmt.Sprintf("  [%d] %s DHCP: %v IPv4: %v IPv6: %v Latency: %v\n",
-				i+1, status, test.DHCPRenewTime, test.IPv4Connectivity, test.IPv6Connectivity, test.Latency)
+			chartText += fmt.Sprintf("  [%d] %s DHCP: %v\n",
+				i+1, status, test.DHCPRenewTime)
 		}
 	}
 
@@ -188,12 +188,8 @@ func (w *WiFiMonitor) updateUI() {
 			if i >= 10 { // Show only latest 10 ping tests
 				break
 			}
-			status := "[red]✗"
-			if test.Success {
-				status = "[green]✓"
-			}
-			chartText += fmt.Sprintf("  [%d] %s IPv4: %v IPv6: %v Latency: %v\n",
-				i+1, status, test.IPv4Connectivity, test.IPv6Connectivity, test.Latency)
+			chartText += fmt.Sprintf("  [%d] IPv4: %v IPv6: %v Latency: %v\n",
+				i+1, test.IPv4Connectivity, test.IPv6Connectivity, test.Latency)
 		}
 	}
 
