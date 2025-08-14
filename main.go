@@ -165,23 +165,43 @@ func (w *WiFiMonitor) updateUI() {
 		return // No UI updates in headless mode
 	}
 
-	// Calculate success rate
-	var successRate float64
-	if w.totalCount > 0 {
-		successRate = float64(w.successCount) / float64(w.totalCount) * 100
-	}
+	   // Calculate success rates
+	   var successRate, dhcpSuccessRate, pingSuccessRate float64
+	   if w.totalCount > 0 {
+		   successRate = float64(w.successCount) / float64(w.totalCount) * 100
+	   }
+	   if len(w.dhcpTests) > 0 {
+		   dhcpSuccesses := 0
+		   for _, t := range w.dhcpTests {
+			   if t.Success {
+				   dhcpSuccesses++
+			   }
+		   }
+		   dhcpSuccessRate = float64(dhcpSuccesses) / float64(len(w.dhcpTests)) * 100
+	   }
+	   if len(w.pingTests) > 0 {
+		   pingSuccesses := 0
+		   for _, t := range w.pingTests {
+			   if t.Success {
+				   pingSuccesses++
+			   }
+		   }
+		   pingSuccessRate = float64(pingSuccesses) / float64(len(w.pingTests)) * 100
+	   }
 
-	// Get current time
-	currentTime := time.Now().Format("2006-01-02 15:04:05")
+	   // Get current time
+	   currentTime := time.Now().Format("2006-01-02 15:04:05")
 
-	// Update statistics display
-	statsText := fmt.Sprintf(
-		"[white]WiFi Quality Monitor - NOC Watch -\n"+
-			"Current Time: [cyan]%s[white]\n"+
-			"Total Tests: %d | [green]Success: %d[white] | [red]Failure: %d[white]\n"+
-			"Success Rate: [yellow]%.2f%%[white]\n",
-		currentTime, w.totalCount, w.successCount, w.totalCount-w.successCount, successRate,
-	)
+	   // Update statistics display
+	   statsText := fmt.Sprintf(
+		   "[white]WiFi Quality Monitor - NOC Watch -\n"+
+			   "Current Time: [cyan]%s[white]\n"+
+			   "Total Tests: %d | [green]Success: %d[white] | [red]Failure: %d[white]\n"+
+			   "Success Rate: [yellow]%.2f%%[white]\n"+
+			   "DHCP Success Rate: [yellow]%.2f%%[white]\n"+
+			   "Ping Success Rate: [yellow]%.2f%%[white]\n",
+		   currentTime, w.totalCount, w.successCount, w.totalCount-w.successCount, successRate, dhcpSuccessRate, pingSuccessRate,
+	   )
 
 	// Update chart display (ASCII art)
 	chartText := "Test Results:\n\n"
@@ -290,18 +310,45 @@ func (w *WiFiMonitor) writeResultsToFile() error {
 		}
 	}
 
-	// Write statistics
-	_, err = fmt.Fprintf(file, "Total Tests: %d, Success: %d, Success Rate: %.2f%%\n",
-		w.totalCount, w.successCount,
-		func() float64 {
-			if w.totalCount > 0 {
-				return float64(w.successCount) / float64(w.totalCount) * 100
-			}
-			return 0
-		}())
-	if err != nil {
-		return err
-	}
+	   // Write statistics
+	   var dhcpSuccessRate, pingSuccessRate float64
+	   if len(w.dhcpTests) > 0 {
+		   dhcpSuccesses := 0
+		   for _, t := range w.dhcpTests {
+			   if t.Success {
+				   dhcpSuccesses++
+			   }
+		   }
+		   dhcpSuccessRate = float64(dhcpSuccesses) / float64(len(w.dhcpTests)) * 100
+	   }
+	   if len(w.pingTests) > 0 {
+		   pingSuccesses := 0
+		   for _, t := range w.pingTests {
+			   if t.Success {
+				   pingSuccesses++
+			   }
+		   }
+		   pingSuccessRate = float64(pingSuccesses) / float64(len(w.pingTests)) * 100
+	   }
+	   _, err = fmt.Fprintf(file, "Total Tests: %d, Success: %d, Success Rate: %.2f%%\n",
+		   w.totalCount, w.successCount,
+		   func() float64 {
+			   if w.totalCount > 0 {
+				   return float64(w.successCount) / float64(w.totalCount) * 100
+			   }
+			   return 0
+		   }())
+	   if err != nil {
+		   return err
+	   }
+	   _, err = fmt.Fprintf(file, "DHCP Success Rate: %.2f%%\n", dhcpSuccessRate)
+	   if err != nil {
+		   return err
+	   }
+	   _, err = fmt.Fprintf(file, "Ping Success Rate: %.2f%%\n", pingSuccessRate)
+	   if err != nil {
+		   return err
+	   }
 
 	_, err = fmt.Fprintf(file, "==========================================\n")
 	return err
